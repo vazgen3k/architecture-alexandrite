@@ -1,0 +1,42 @@
+@startuml
+actor Operator
+participant "MES_UI" as MES_UI
+participant "MES_API" as MES_API
+participant "Redis" as Redis_Cache
+participant "MES_DB" as MES_DB
+
+== Чтение списка заказов ==
+
+Operator->>MES_UI: Открывает список заказов
+MES_UI->>MES_API: GET /orders?status=MANUFACTURING_APPROVED&page=1
+MES_API->>Redis_Cache: GET orders:list:status=MANUFACTURING_APPROVED:page=1
+
+alt cache hit
+    Redis_Cache-->>MES_API: cached response
+    MES_API-->>MES_UI: Список заказов из кеша
+    MES_UI-->>Operator: Отображает список
+else cache miss
+    Redis_Cache-->>MES_API: miss
+    MES_API->>MES_DB: SELECT orders by status/page/sort
+    MES_DB-->>MES_API: result set
+    MES_API->>Redis_Cache: SET orders:list:status=MANUFACTURING_APPROVED:page=1 TTL=30s
+    MES_API-->>MES_UI: Список заказов из БД
+    MES_UI-->>Operator: Отображает список
+end
+
+== Изменение статуса заказа ==
+
+Operator->>MES_UI: Меняет статус заказа
+MES_UI->>MES_API: PATCH /orders/{id}/status
+MES_API->>MES_DB: UPDATE orders SET status = NEW_STATUS WHERE id = {id}
+MES_DB-->>MES_API: update success
+
+MES_API->>Redis_Cache: DEL orders:list:status=OLD_STATUS:page=1
+MES_API->>Redis_Cache: DEL orders:list:status=NEW_STATUS:page=1
+MES_API->>Redis_Cache: DEL orders:dashboard:counts
+MES_API->>Redis_Cache: DEL order:{id}
+
+MES_API-->>MES_UI: Статус успешно обновлён
+MES_UI-->>Operator: Показывает обновлённый статус
+
+@enduml
